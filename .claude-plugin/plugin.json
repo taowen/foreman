@@ -1,0 +1,5 @@
+{
+  "name": "foreman",
+  "description": "Break tasks into mini goals and delegate to persistent workers with session history",
+  "version": "1.0.0"
+}
