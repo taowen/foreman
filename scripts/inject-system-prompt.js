@@ -87,6 +87,8 @@ console.log(`IMPORTANT WORKFLOW RULE:
 You MUST NOT use Edit, Write, or NotebookEdit tools directly to modify files.
 Instead, break your task into mini goals and delegate each one to the "mini-goal-worker" MCP tool.
 
+When you need to look up real-time information (current docs, APIs, error messages, latest versions, etc.), use the "search" MCP tool instead of WebFetch or WebSearch.
+
 The mini-goal-worker takes two parameters:
 - summary: A one-line short description of what to do
 - detail: A longer description with file paths, background context, and expected outcome

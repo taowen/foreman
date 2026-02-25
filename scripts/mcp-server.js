@@ -167,7 +167,7 @@ server.tool(
 
 server.tool(
   "search",
-  { query: z.string().describe("A search query in natural language") },
+  { query: z.string().describe("Search the web for real-time information. Use this when you need current facts, documentation, API references, error messages, or anything not in your training data.") },
   async ({ query: searchQuery }) => {
     if (!process.env.SEARCH_API_KEY) {
       return {
