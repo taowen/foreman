@@ -37,8 +37,9 @@ server.tool(
   "web-fetch",
   {
     url: z.string().describe("The URL to fetch and return as markdown"),
+    prompt: z.string().optional().describe("Optional prompt to generate a JS function that extracts/transforms the markdown. The function receives the raw markdown as input and should return the refined result."),
   },
-  async ({ url }) => callClaudex("/tool/web-fetch", { url })
+  async ({ url, prompt }) => callClaudex("/tool/web-fetch", { url, prompt })
 );
 
 const transport = new StdioServerTransport();
