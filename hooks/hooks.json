@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/inject-system-prompt.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js session-start"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/check-worker-name.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js user-prompt-submit"
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/record-plan.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js exit-plan-mode"
           }
         ]
       }
@@ -37,7 +37,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/record-stop.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js stop"
           }
         ]
       }

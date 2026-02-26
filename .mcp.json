@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "foreman": {
-      "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server.js"]
+      "command": "bash",
+      "args": ["-c", "node \"${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server.js\""]
     }
   }
 }
