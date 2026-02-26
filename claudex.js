@@ -81,10 +81,7 @@ function findSessionJsonl(sessionId) {
 
 // --- State ---
 let child = null;
-let restartPending = false;
 let history = [];
-let pendingResume = null; // { type, summary, detail }
-let mainSessionId = null;
 
 // --- History management ---
 function loadHistory() {
@@ -107,25 +104,12 @@ function appendToHistory(entry) {
   } catch {}
 }
 
-// --- Session size checking ---
-function getMainSessionSizeKb() {
-  if (!mainSessionId) return null;
-  const jsonl = findSessionJsonl(mainSessionId);
-  if (!jsonl) return null;
-  return jsonl.size > MAX_SESSION_SIZE ? Math.round(jsonl.size / 1024) : null;
-}
-
 // --- System prompt template ---
 const promptTemplate = readFileSync(join(pluginDir, "prompts", "system-prompt.md"), "utf-8");
 
 // --- Build system prompt ---
 function buildSystemPrompt() {
-  // Resume section (consumed once)
   let resumeSection = "";
-  if (pendingResume) {
-    resumeSection = `\n\n## AUTO-RESUME: Pending mini-goal\n\nThe previous session was automatically restarted because the main agent context grew too large. There is a pending mini-goal that was NOT executed. Please execute it immediately using the mini-goal-worker tool:\n\n**Summary:** ${pendingResume.summary}\n**Detail:** ${pendingResume.detail}`;
-    pendingResume = null;
-  }
 
   // History section (3-tier compression)
   let historySection = "";
@@ -153,10 +137,6 @@ function buildSystemPrompt() {
       const e = history[i];
       if (e.type === "user_prompt") parts.push(`[USER] ${e.prompt}`);
       else if (e.type === "assistant_result") parts.push(`[ASSISTANT] ${e.message}`);
-      else if (e.type === "mini_goal_result") {
-        const status = e.error ? "ERROR" : "DONE";
-        parts.push(`[MINI_GOAL ${status}] ${e.summary}: ${e.result}`);
-      }
     }
 
     for (let i = recentStart; i < total; i++) {
@@ -169,6 +149,8 @@ function buildSystemPrompt() {
         parts.push(`[MINI_GOAL ${status}] ${e.summary}: ${e.result}`);
       }
       else if (e.type === "plan_accepted") parts.push(`[PLAN] ${e.plan}`);
+      else if (e.type === "subagent_start") parts.push(`[SUBAGENT_START ${e.subagent_type}] ${e.description}: ${e.prompt}`);
+      else if (e.type === "subagent_stop") parts.push(`[SUBAGENT_STOP ${e.agent_type}] ${e.last_assistant_message}`);
     }
 
     historySection = `\n## Chat history (restored from ${historyFile})\n\n${parts.join("\n\n")}\n`;
@@ -177,14 +159,6 @@ function buildSystemPrompt() {
   return promptTemplate
     .replace("{{HISTORY_SECTION}}", historySection)
     .replace("{{RESUME_SECTION}}", resumeSection);
-}
-
-// --- Trigger restart ---
-function triggerRestart(sizeKb) {
-  if (restartPending) return;
-  restartPending = true;
-  console.log(`\n[claudex] Main agent context too large (${sizeKb}KB > ${MAX_SESSION_SIZE / 1024}KB). Restarting...\n`);
-  setTimeout(() => { if (child) child.kill("SIGTERM"); }, 200);
 }
 
 // --- HTTP Server ---
@@ -204,9 +178,8 @@ const httpServer = createServer(async (req, res) => {
   try {
     // --- Hook: SessionStart ---
     if (req.method === "POST" && req.url === "/hook/session-start") {
-      const data = await parseBody(req);
-      if (data.session_id) mainSessionId = data.session_id;
       const prompt = buildSystemPrompt();
+      try { writeFileSync(join(workerDir, "LAST_SYSTEM_PROMPT.log"), prompt); } catch {}
       res.writeHead(200, { "Content-Type": "text/plain" });
       res.end(prompt);
       return;
@@ -236,14 +209,41 @@ const httpServer = createServer(async (req, res) => {
       return;
     }
 
+    // --- Hook: SubagentPretool (PreToolUse Task) ---
+    if (req.method === "POST" && req.url === "/hook/subagent-pretool") {
+      const data = await parseBody(req);
+      const input = data.tool_input || {};
+      let prompt = input.prompt;
+      if (prompt && prompt.length > 20000) {
+        prompt = undefined;
+      }
+      appendToHistory({ type: "subagent_start", subagent_type: input.subagent_type, description: input.description, prompt });
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
+    // --- Hook: SubagentStop ---
+    if (req.method === "POST" && req.url === "/hook/subagent-stop") {
+      const data = await parseBody(req);
+      if (data.agent_type) {
+        let msg = data.last_assistant_message;
+        if (msg && msg.length > 20000) {
+          msg = undefined;
+        }
+        appendToHistory({ type: "subagent_stop", agent_id: data.agent_id, agent_type: data.agent_type, last_assistant_message: msg });
+      }
+      res.writeHead(200);
+      res.end();
+      return;
+    }
+
     // --- Hook: Stop ---
     if (req.method === "POST" && req.url === "/hook/stop") {
       const data = await parseBody(req);
       if (data.last_assistant_message && data.last_assistant_message.length <= 20000) {
         appendToHistory({ type: "assistant_result", message: data.last_assistant_message });
       }
-      const sizeKb = getMainSessionSizeKb();
-      if (sizeKb) triggerRestart(sizeKb);
       res.writeHead(200);
       res.end();
       return;
@@ -256,18 +256,6 @@ const httpServer = createServer(async (req, res) => {
 
       // Record mini goal to history
       appendToHistory({ type: "mini_goal", summary, detail });
-
-      // Check main agent session size → restart if too large
-      const sizeKb = getMainSessionSizeKb();
-      if (sizeKb) {
-        pendingResume = { type: "pending_mini_goal", summary, detail };
-        const msg = `CONTEXT_RESTART: Main agent session too large (${sizeKb}KB). Claude is being restarted by claudex with a fresh session. This mini-goal will be retried automatically.`;
-        appendToHistory({ type: "mini_goal_result", summary, result: msg, error: true });
-        triggerRestart(sizeKb);
-        res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ content: [{ type: "text", text: msg }], isError: true }));
-        return;
-      }
 
       // Check worker session size → reset if too large
       let stderrOutput = "";
@@ -449,7 +437,6 @@ const httpServer = createServer(async (req, res) => {
 
 // --- Launch claude ---
 function launchClaude(port) {
-  restartPending = false;
   mkdirSync(workerDir, { recursive: true });
 
   const args = ["--plugin-dir", pluginDir, "--dangerously-skip-permissions", "--debug", "--disallowed-tools", "WebSearch,WebFetch", ...userArgs];
@@ -465,11 +452,6 @@ function launchClaude(port) {
   });
 
   child.on("exit", (code) => {
-    if (restartPending) {
-      console.log("[claudex] Restarting claude with fresh session...\n");
-      launchClaude(port);
-      return;
-    }
     httpServer.close();
     process.exit(code || 0);
   });

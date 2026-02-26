@@ -29,11 +29,11 @@ All hooks and MCP tools are thin HTTP proxies — the real logic lives in `claud
 ## Setup
 
 ```bash
-git clone https://github.com/anthropics/foreman.git
+git clone https://github.com/taowen/foreman.git
 cd foreman
 npm install
 cp .env.example .env
-# Edit .env and add your SEARCH_API_KEY (for web search)
+# Edit .env: SEARCH_API_KEY (web search), CF_ACCOUNT_ID + CF_BROWSER_TOKEN (web fetch)
 ```
 
 ## Usage
@@ -52,10 +52,7 @@ The main agent's system prompt forbids direct file edits (`Edit`, `Write`, `Note
 
 ### Automatic context management
 
-Both the main agent and the worker have 400KB session size limits:
-
-- **Main agent**: claudex checks the session JSONL size on every `Stop` event and before each mini-goal. If exceeded, it kills claude and respawns with a fresh session. Pending mini-goals are automatically resumed via system prompt injection.
-- **Worker**: claudex checks the worker's session JSONL before execution. If exceeded, it deletes the session ID and returns a `CONTEXT_RESET` error. The main agent must resend full context.
+The worker has a 400KB session size limit. claudex checks the worker's session JSONL before execution. If exceeded, it deletes the session ID and returns a `CONTEXT_RESET` error. The main agent must resend full context.
 
 ### History compression
 
@@ -64,7 +61,7 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 | Tier | Content |
 |:---|:---|
 | Old (omitted) | Entry count only |
-| Middle | User prompts + assistant responses + mini-goal results |
+| Middle | User prompts + assistant responses |
 | Recent (last 20+) | Full detail including mini-goal descriptions and plans |
 
 ## HTTP Endpoints
@@ -74,10 +71,12 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 | `POST /hook/session-start` | hook.js | Returns system prompt (rules + history + resume info) |
 | `POST /hook/user-prompt-submit` | hook.js | Records user prompt to history |
 | `POST /hook/exit-plan-mode` | hook.js | Records accepted plan to history |
-| `POST /hook/stop` | hook.js | Records assistant response, checks session size |
+| `POST /hook/subagent-pretool` | hook.js | Records Task tool call (prompt, description, subagent_type) to history |
+| `POST /hook/subagent-stop` | hook.js | Records subagent stop + result to history |
+| `POST /hook/stop` | hook.js | Records assistant response |
 | `POST /tool/mini-goal-worker` | mcp-server.js | Checks sizes, executes worker, returns result |
 | `POST /tool/web-search` | mcp-server.js | Proxies web search via external API |
-| `POST /tool/web-fetch` | mcp-server.js | Fetches URL content via Claude Haiku with web_fetch |
+| `POST /tool/web-fetch` | mcp-server.js | Fetches URL as markdown via Cloudflare Browser Rendering |
 | `POST /clear-history` | slash command | Resets history and worker session |
 
 ## MCP Tools
@@ -85,8 +84,8 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 | Tool | Description |
 |:---|:---|
 | `mini-goal-worker` | Delegates a mini goal to the persistent worker. Takes `summary` and `detail`. |
-| `web-search` | Web search for real-time information. Requires `SEARCH_API_KEY` in `.env`. |
-| `web-fetch` | Fetch a URL and analyze its content. Uses Claude Haiku with web_fetch tool. Requires `SEARCH_API_KEY`. |
+| `web-search` | Web search via Grok model (whatai.cc). Requires `SEARCH_API_KEY` in `.env`. |
+| `web-fetch` | Fetches URL as markdown via Cloudflare Browser Rendering. Requires `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` in `.env`. |
 
 ## Slash Commands
 
