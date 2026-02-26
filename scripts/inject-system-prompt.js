@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, unlinkSync, appendFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
 
@@ -9,8 +9,23 @@ if (!workerName) {
   process.exit(0);
 }
 
-// --- Build chat history from history.jsonl ---
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
+
+// --- Check for accepted plan (pending-plan.json written by record-plan.js) ---
+const pendingPlanFile = join(workerDir, "pending-plan.json");
+try {
+  const raw = readFileSync(pendingPlanFile, "utf-8");
+  const { plan, timestamp } = JSON.parse(raw);
+  const age = Date.now() - timestamp;
+  if (plan && age < 5000) {
+    mkdirSync(workerDir, { recursive: true });
+    const line = JSON.stringify({ type: "plan_accepted", plan, timestamp: new Date().toISOString() });
+    appendFileSync(join(workerDir, "history.jsonl"), line + "\n", "utf-8");
+  }
+  unlinkSync(pendingPlanFile);
+} catch {}
+
+// --- Build chat history from history.jsonl ---
 const historyFile = join(workerDir, "history.jsonl");
 
 let historySection = "";
@@ -58,7 +73,7 @@ try {
           const status = e.error ? "ERROR" : "DONE";
           parts.push(`[MINI_GOAL ${status}] ${e.summary}: ${e.result}`);
         }
-        // skip mini_goal entries in middle tier
+        // skip mini_goal and plan_accepted entries in middle tier
       }
 
       // Recent: full detail
@@ -73,6 +88,8 @@ try {
         } else if (e.type === "mini_goal_result") {
           const status = e.error ? "ERROR" : "DONE";
           parts.push(`[MINI_GOAL ${status}] ${e.summary}: ${e.result}`);
+        } else if (e.type === "plan_accepted") {
+          parts.push(`[PLAN] ${e.plan}`);
         }
       }
 
