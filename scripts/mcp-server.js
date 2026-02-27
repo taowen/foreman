@@ -25,22 +25,26 @@ server.tool(
   async ({ summary, detail }) => callClaudex("/tool/mini-goal-worker", { summary, detail })
 );
 
-server.tool(
-  "web-search",
-  {
-    query: z.string().describe("Search the web for real-time information. Use this when you need current facts, documentation, API references, error messages, or anything not in your training data."),
-  },
-  async ({ query }) => callClaudex("/tool/web-search", { query })
-);
+if (process.env.SEARCH_API_KEY && process.env.SEARCH_API_URL && process.env.SEARCH_MODEL) {
+  server.tool(
+    "web-search",
+    {
+      query: z.string().describe("Search the web for real-time information. Use this when you need current facts, documentation, API references, error messages, or anything not in your training data."),
+    },
+    async ({ query }) => callClaudex("/tool/web-search", { query })
+  );
+}
 
-server.tool(
-  "web-fetch",
-  {
-    url: z.string().describe("The URL to fetch and return as markdown"),
-    prompt: z.string().optional().describe("Optional prompt to generate a JS function that extracts/transforms the markdown. The function receives the raw markdown as input and should return the refined result."),
-  },
-  async ({ url, prompt }) => callClaudex("/tool/web-fetch", { url, prompt })
-);
+if (process.env.CF_ACCOUNT_ID && process.env.CF_BROWSER_TOKEN) {
+  server.tool(
+    "web-fetch",
+    {
+      url: z.string().describe("The URL to fetch and return as markdown"),
+      prompt: z.string().optional().describe("Optional prompt to generate a JS function that extracts/transforms the markdown. The function receives the raw markdown as input and should return the refined result."),
+    },
+    async ({ url, prompt }) => callClaudex("/tool/web-fetch", { url, prompt })
+  );
+}
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
