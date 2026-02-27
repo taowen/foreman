@@ -2,14 +2,6 @@ const hookName = process.argv[2];
 const claudexPort = process.env.CLAUDEX_PORT;
 
 if (!claudexPort) {
-  if (hookName === "user-prompt-submit" && !process.env.WORKER_NAME) {
-    console.log(JSON.stringify({
-      decision: "block",
-      reason: "WORKER_NAME environment variable is required. Start with: WORKER_NAME=xxx node claudex.js"
-    }));
-  } else if (hookName === "session-start" && !process.env.WORKER_NAME) {
-    console.log("The WORKER_NAME environment variable is missing. Tell the user they need to set it before starting. Example: WORKER_NAME=xxx node claudex.js");
-  }
   process.exit(0);
 }
 

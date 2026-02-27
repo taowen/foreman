@@ -40,10 +40,13 @@ cp .env.example .env
 ## Usage
 
 ```bash
+node claudex.js [claude args...]
+
+# Or with explicit worker name:
 WORKER_NAME=my-project node claudex.js [claude args...]
 ```
 
-`WORKER_NAME` identifies the worker session. Use the same name across sessions to preserve history and worker context.
+`WORKER_NAME` identifies the worker session and defaults to the current directory name. Set it explicitly to share history across different directories or to use a custom name.
 
 ## How It Works
 
@@ -116,7 +119,9 @@ foreman/
 ├── claudex.js                      # Launcher + HTTP server + restart logic
 ├── lib/
 │   ├── hooks.js                    # Hook handlers (session-start, user-prompt-submit, etc.)
-│   ├── tools.js                    # MCP tool handlers (mini-goal-worker, web-search, web-fetch)
+│   ├── tools.js                    # Mini-goal-worker handler + tool registry
+│   ├── web-search.js               # Web search via external API
+│   ├── web-fetch.js                # URL fetch + LLM-based content extraction
 │   ├── prompt.js                   # System prompt builder (3-tier history, justRestarted flag)
 │   ├── topic-detector.js           # LLM-based new topic detection
 │   ├── recent-history.js           # Short-term history for topic detection
@@ -138,7 +143,7 @@ foreman/
 
 ## Worker Data
 
-Per-worker data is stored at `~/.claude/mini-goal-workers/<WORKER_NAME>/`:
+Per-worker data is stored at `~/.claude/mini-goal-workers/<WORKER_NAME>/` (defaults to cwd basename):
 
 | File | Purpose |
 |:---|:---|

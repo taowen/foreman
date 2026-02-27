@@ -2,7 +2,7 @@
 import { spawn } from "child_process";
 import { createServer } from "http";
 import { readFileSync, mkdirSync } from "fs";
-import { join, dirname } from "path";
+import { join, dirname, basename } from "path";
 import { homedir } from "os";
 import { fileURLToPath } from "url";
 
@@ -29,12 +29,7 @@ try {
   }
 } catch {}
 
-const workerName = process.env.WORKER_NAME;
-if (!workerName) {
-  console.error("Error: WORKER_NAME environment variable is required.");
-  console.error("Usage: WORKER_NAME=xxx node claudex.js [claude args...]");
-  process.exit(1);
-}
+const workerName = process.env.WORKER_NAME || basename(process.cwd());
 
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
 const userArgs = process.argv.slice(2);
