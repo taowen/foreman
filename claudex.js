@@ -12,6 +12,8 @@ import { createHistoryManager } from "./lib/history.js";
 import { createPromptBuilder } from "./lib/prompt.js";
 import { createHookHandlers } from "./lib/hooks.js";
 import { createToolHandlers } from "./lib/tools.js";
+import { createTopicDetector } from "./lib/topic-detector.js";
+import { createRecentHistory } from "./lib/recent-history.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pluginDir = __dirname;
@@ -36,18 +38,27 @@ if (!workerName) {
 
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
 const userArgs = process.argv.slice(2);
-const MAX_SESSION_SIZE = 400 * 1024; // 400KB
+const MAX_SESSION_SIZE = 500 * 1024; // 500KB
 
-// --- Initialize modules ---
+// --- Initialize modules (phase 1: no dependency on loaded history) ---
 const log = createLogger(workerDir);
 const sessionManager = createSessionManager(workerDir, log);
 const historyManager = createHistoryManager(workerDir, log);
 const promptBuilder = createPromptBuilder(pluginDir, historyManager, log);
-const hookHandlers = createHookHandlers({ historyManager, promptBuilder, workerDir, log });
-const toolHandlers = createToolHandlers({ sessionManager, historyManager, workerDir, pluginDir, log, MAX_SESSION_SIZE });
+const sharedState = { mainSessionId: null };
+const onRestart = (prompt) => {
+  pendingRestart = { prompt };
+  setTimeout(() => { if (child) child.kill("SIGTERM"); }, 200);
+};
+const toolHandlers = createToolHandlers({ sessionManager, historyManager, workerDir, pluginDir, log, MAX_SESSION_SIZE, sharedState, onRestart });
+
+// Phase 2 modules (depend on loaded history) are initialized at startup below
+let recentHistory, topicDetector, hookHandlers;
 
 // --- State ---
 let child = null;
+let pendingRestart = null; // { prompt: string }
+let serverPort = null;
 
 // --- HTTP Server ---
 function parseBody(req) {
@@ -102,6 +113,7 @@ const httpServer = createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/clear-history") {
       historyManager.clearHistory();
       sessionManager.deleteSessionId();
+      recentHistory.clear();
       res.writeHead(200);
       res.end();
       return;
@@ -117,11 +129,14 @@ const httpServer = createServer(async (req, res) => {
 });
 
 // --- Launch claude ---
-function launchClaude(port) {
+function launchClaude(port, initialPrompt) {
   mkdirSync(workerDir, { recursive: true });
-  log("server", `launching claude on port ${port}`);
+  log("server", `launching claude on port ${port}${initialPrompt ? ` with prompt: ${initialPrompt.slice(0, 100)}` : ""}`);
 
   const args = ["--plugin-dir", pluginDir, "--dangerously-skip-permissions", "--debug", "--disallowed-tools", "WebSearch,WebFetch", ...userArgs];
+  if (initialPrompt) {
+    args.push("--", initialPrompt);
+  }
 
   child = spawn("claude", args, {
     stdio: "inherit",
@@ -134,18 +149,28 @@ function launchClaude(port) {
   });
 
   child.on("exit", (code) => {
-    log("server", `claude exited with code ${code}`);
-    httpServer.close();
-    process.exit(code || 0);
+    if (pendingRestart) {
+      const { prompt } = pendingRestart;
+      pendingRestart = null;
+      promptBuilder.setJustRestarted(true);
+      launchClaude(port, prompt);
+    } else {
+      log("server", `claude exited with code ${code}`);
+      httpServer.close();
+      process.exit(code || 0);
+    }
   });
 }
 
 // --- Start ---
 log("server", "starting...");
 historyManager.loadHistory();
+recentHistory = createRecentHistory(workerDir, historyManager, log);
+topicDetector = createTopicDetector(recentHistory, log);
+hookHandlers = createHookHandlers({ historyManager, recentHistory, promptBuilder, workerDir, log, topicDetector, sharedState, onRestart });
 httpServer.listen(0, "127.0.0.1", () => {
-  const port = httpServer.address().port;
-  log("server", `listening on 127.0.0.1:${port}`);
-  console.log(`[claudex] Listening on 127.0.0.1:${port}`);
-  launchClaude(port);
+  serverPort = httpServer.address().port;
+  log("server", `listening on 127.0.0.1:${serverPort}`);
+  console.log(`[claudex] Listening on 127.0.0.1:${serverPort}`);
+  launchClaude(serverPort);
 });

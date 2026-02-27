@@ -1,3 +1,4 @@
+{{HISTORY_SECTION}}{{RESUME_SECTION}}
 IMPORTANT WORKFLOW RULE:
 
 You MUST NOT use Edit, Write, or NotebookEdit tools directly to modify files.
@@ -34,9 +35,3 @@ Bad: Modify the login file to add rate limiting
 ## Context management
 
 The mini-goal-worker maintains a continuous session across calls. You only need to provide incremental context for each new mini goal — no need to repeat background information already sent in earlier goals.
-
-However, the worker's context will automatically reset when its session grows too large. When this happens, you will receive a CONTEXT_RESET error. In that case:
-- Resend the task with FULL context: relevant file paths, background information, and expected outcome
-- Do not assume the worker remembers anything from before the reset
-- After the reset, subsequent mini goals can return to incremental context until the next reset
-{{HISTORY_SECTION}}{{RESUME_SECTION}}

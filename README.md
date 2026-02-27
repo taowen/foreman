@@ -1,6 +1,6 @@
 # Foreman
 
-A Claude Code plugin that separates planning from execution. The main agent acts as a **foreman** — it reads your request, plans the work, and delegates cohesive **mini goals** to a persistent worker. `claudex.js` sits in the middle as the orchestration layer, managing all state in memory.
+A Claude Code plugin that separates planning from execution. The main agent acts as a **foreman** — it reads your request, plans the work, and delegates cohesive **mini goals** to a persistent worker. `claudex.js` sits in the middle as the orchestration layer, with logic split across modular `lib/` modules.
 
 ## Architecture
 
@@ -17,14 +17,15 @@ claudex.js ─── HTTP server (127.0.0.1:<random port>)
  │                 • forbidden from editing files directly
  │                 • breaks tasks into mini goals
  │                 • system prompt injected via SessionStart hook
+ │                 • auto-restarts on new topic detection
  │
  └── spawns ──► worker (via claude-agent-sdk)
                    • persistent session across calls
                    • full file editing permissions
-                   • auto-resets when context exceeds 400KB
+                   • silently resets when context exceeds 500KB
 ```
 
-All hooks and MCP tools are thin HTTP proxies — the real logic lives in `claudex.js`.
+All hooks and MCP tools are thin HTTP proxies — the real logic lives in `lib/`.
 
 ## Setup
 
@@ -52,7 +53,20 @@ The main agent's system prompt forbids direct file edits (`Edit`, `Write`, `Note
 
 ### Automatic context management
 
-The worker has a 400KB session size limit. claudex checks the worker's session JSONL before execution. If exceeded, it deletes the session ID and returns a `CONTEXT_RESET` error. The main agent must resend full context.
+Both the worker and main agent have a 500KB session size limit. Before executing a mini-goal, claudex checks:
+
+1. **Main agent JSONL** — If > 500KB, triggers a restart with a "continue" prompt. The incomplete mini-goal will be visible in the new session's system prompt as `[MINI_GOAL incomplete]`.
+2. **Worker session JSONL** — If > 500KB, silently starts a new worker session. Recent mini-goal history (up to 10 pairs) is injected into the new session for context.
+
+### Auto-restart on new topic
+
+When the user sends a message, `topic-detector.js` calls a lightweight LLM to decide if the message is a new topic unrelated to the recent conversation. If yes:
+
+1. Recent history is cleared
+2. The user's prompt is recorded to history
+3. Claude is killed and relaunched with the new prompt injected via `--`
+4. The restarted session uses a minimal system prompt (all history collapsed to `[... N entries omitted ...]`)
+5. A `justRestarted` flag skips topic detection on the first message after restart
 
 ### History compression
 
@@ -62,16 +76,20 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 |:---|:---|
 | Old (omitted) | Entry count only |
 | Middle | User prompts + assistant responses |
-| Recent (last 20+) | Full detail including mini-goal descriptions and plans |
+| Recent (last 20+) | Full detail including mini-goal summaries, plans, and subagent activity |
+
+The history section is placed at the **top** of the system prompt, with workflow rules at the bottom (closer to the conversation for stronger influence on the model).
+
+Completed mini-goals show only the summary. Incomplete mini-goals (no result entry following) show summary + full detail marked as `[MINI_GOAL incomplete]`.
 
 ## HTTP Endpoints
 
 | Endpoint | Caller | Purpose |
 |:---|:---|:---|
-| `POST /hook/session-start` | hook.js | Returns system prompt (rules + history + resume info) |
-| `POST /hook/user-prompt-submit` | hook.js | Records user prompt to history |
+| `POST /hook/session-start` | hook.js | Stores main session ID, returns system prompt |
+| `POST /hook/user-prompt-submit` | hook.js | Runs topic detection, records prompt, triggers restart if new topic |
 | `POST /hook/exit-plan-mode` | hook.js | Records accepted plan to history |
-| `POST /hook/subagent-pretool` | hook.js | Records Task tool call (prompt, description, subagent_type) to history |
+| `POST /hook/subagent-pretool` | hook.js | Records Task tool call to history |
 | `POST /hook/subagent-stop` | hook.js | Records subagent stop + result to history |
 | `POST /hook/stop` | hook.js | Records assistant response |
 | `POST /tool/mini-goal-worker` | mcp-server.js | Checks sizes, executes worker, returns result |
@@ -95,7 +113,16 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 
 ```
 foreman/
-├── claudex.js                      # Central launcher + HTTP server (all logic)
+├── claudex.js                      # Launcher + HTTP server + restart logic
+├── lib/
+│   ├── hooks.js                    # Hook handlers (session-start, user-prompt-submit, etc.)
+│   ├── tools.js                    # MCP tool handlers (mini-goal-worker, web-search, web-fetch)
+│   ├── prompt.js                   # System prompt builder (3-tier history, justRestarted flag)
+│   ├── topic-detector.js           # LLM-based new topic detection
+│   ├── recent-history.js           # Short-term history for topic detection
+│   ├── history.js                  # history.jsonl management
+│   ├── session.js                  # Session ID + JSONL lookup
+│   └── logger.js                   # Logging
 ├── .claude-plugin/plugin.json      # Plugin manifest
 ├── .mcp.json                       # MCP server config
 ├── hooks/hooks.json                # Hook registrations (all → hook.js)
@@ -117,6 +144,8 @@ Per-worker data is stored at `~/.claude/mini-goal-workers/<WORKER_NAME>/`:
 |:---|:---|
 | `session-id` | Worker's Claude Code session ID for resuming |
 | `history.jsonl` | Full interaction log |
+| `recent-history.json` | Short-term history for topic detection |
+| `last-system-prompt.log` | Last generated system prompt (debug) |
 
 ## License
 
