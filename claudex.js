@@ -33,7 +33,7 @@ const workerName = process.env.WORKER_NAME || basename(process.cwd());
 
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
 const userArgs = process.argv.slice(2);
-const MAX_SESSION_SIZE = 500 * 1024; // 500KB
+const MAX_SESSION_SIZE = 800 * 1024; // 800KB
 
 // --- Initialize modules (phase 1: no dependency on loaded history) ---
 const log = createLogger(workerDir);
@@ -41,8 +41,8 @@ const sessionManager = createSessionManager(workerDir, log);
 const historyManager = createHistoryManager(workerDir, log);
 const promptBuilder = createPromptBuilder(pluginDir, historyManager, log);
 const sharedState = { mainSessionId: null };
-const onRestart = (prompt) => {
-  pendingRestart = { prompt };
+const onRestart = (prompt, reason) => {
+  pendingRestart = { prompt, reason };
   setTimeout(() => { if (child) child.kill("SIGTERM"); }, 200);
 };
 const toolHandlers = createToolHandlers({ sessionManager, historyManager, workerDir, pluginDir, log, MAX_SESSION_SIZE, sharedState, onRestart });
@@ -145,9 +145,9 @@ function launchClaude(port, initialPrompt) {
 
   child.on("exit", (code) => {
     if (pendingRestart) {
-      const { prompt } = pendingRestart;
+      const { prompt, reason } = pendingRestart;
       pendingRestart = null;
-      promptBuilder.setJustRestarted(true);
+      promptBuilder.setJustRestarted(reason || "topic");
       launchClaude(port, prompt);
     } else {
       log("server", `claude exited with code ${code}`);
