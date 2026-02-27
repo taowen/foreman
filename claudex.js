@@ -33,7 +33,7 @@ const workerName = process.env.WORKER_NAME || basename(process.cwd());
 
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
 const userArgs = process.argv.slice(2);
-const MAX_SESSION_SIZE = 800 * 1024; // 800KB
+const MAX_SESSION_SIZE = 600 * 1024; // 600KB
 
 // --- Initialize modules (phase 1: no dependency on loaded history) ---
 const log = createLogger(workerDir);
