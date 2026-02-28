@@ -16,15 +16,6 @@ async function callClaudex(path, data) {
 
 const server = new McpServer({ name: "foreman", version: "1.0.0" });
 
-server.tool(
-  "mini-goal-worker",
-  {
-    summary: z.string().describe("One-line short summary of the mini goal"),
-    detail: z.string().describe("Detailed description with file paths (@/absolute/path), background context, and expected outcome"),
-  },
-  async ({ summary, detail }) => callClaudex("/tool/mini-goal-worker", { summary, detail })
-);
-
 if (process.env.SEARCH_API_KEY && process.env.SEARCH_API_URL && process.env.SEARCH_MODEL) {
   server.tool(
     "web-search",

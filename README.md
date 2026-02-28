@@ -1,6 +1,6 @@
 # Foreman
 
-A Claude Code plugin that separates planning from execution. The main agent acts as a **foreman** — it reads your request, plans the work, and delegates cohesive **mini goals** to a persistent worker. `claudex.js` sits in the middle as the orchestration layer, with logic split across modular `lib/` modules.
+A Claude Code plugin that separates planning from execution. The main agent acts as a **foreman** — it reads your request, plans the work, and delegates tasks to **subagents** (via Claude Code's built-in Task tool). `claudex.js` sits in the middle as the orchestration layer, providing persistent history across session resets.
 
 ## Architecture
 
@@ -13,16 +13,14 @@ claudex.js ─── HTTP server (127.0.0.1:<random port>)
  │                 ├── /tool/*        ← mcp-server.js (thin proxy)
  │                 └── /clear-history ← slash command
  │
- ├── spawns ──► claude (main agent / foreman)
- │                 • forbidden from editing files directly
- │                 • breaks tasks into mini goals
- │                 • system prompt injected via SessionStart hook
- │                 • auto-restarts on new topic detection
- │
- └── spawns ──► worker (via claude-agent-sdk)
-                   • persistent session across calls
-                   • full file editing permissions
-                   • silently resets when context exceeds 500KB
+ └── spawns ──► claude (main agent / foreman)
+                  • breaks tasks into subagent calls (Task tool)
+                  • system prompt injected via SessionStart hook
+                  • auto-restarts on new topic detection or context overflow
+                  │
+                  ├── Task("mini-goal-worker") ← custom agent (agents/)
+                  ├── Task("Explore")          ← built-in agent
+                  └── Task(...)                ← other built-in agents
 ```
 
 All hooks and MCP tools are thin HTTP proxies — the real logic lives in `lib/`.
@@ -50,16 +48,13 @@ WORKER_NAME=my-project node claudex.js [claude args...]
 
 ## How It Works
 
-### Planner-executor separation
+### Subagent-based execution
 
-The main agent's system prompt forbids direct file edits (`Edit`, `Write`, `NotebookEdit`). Instead, it must call the `mini-goal-worker` MCP tool with a `summary` and `detail`. claudex receives the request, spawns (or resumes) a worker via the Claude Agent SDK, and returns the result.
+The main agent's system prompt instructs it to delegate work via Claude Code's Task tool. A custom `mini-goal-worker` agent (defined in `agents/mini-goal-worker.md`) handles focused units of work, while built-in agents like `Explore` handle codebase exploration. Subagent start/stop events are recorded to `history.jsonl` via hooks, preserving descriptions and results across session resets.
 
 ### Automatic context management
 
-Both the worker and main agent have a 500KB session size limit. Before executing a mini-goal, claudex checks:
-
-1. **Main agent JSONL** — If > 500KB, triggers a restart with a "continue" prompt. The incomplete mini-goal will be visible in the new session's system prompt as `[MINI_GOAL incomplete]`.
-2. **Worker session JSONL** — If > 500KB, silently starts a new worker session. Recent mini-goal history (up to 10 pairs) is injected into the new session for context.
+Before each subagent call, the `subagent-pretool` hook checks the main agent's session JSONL size. If it exceeds 600KB, claudex triggers a restart with a "continue" prompt. The new session's system prompt includes compressed history so the agent can pick up where it left off.
 
 ### Auto-restart on new topic
 
@@ -79,11 +74,9 @@ Interactions are logged to `history.jsonl` and restored into the system prompt o
 |:---|:---|
 | Old (omitted) | Entry count only |
 | Middle | User prompts + assistant responses |
-| Recent (last 20+) | Full detail including mini-goal summaries, plans, and subagent activity |
+| Recent (last 10+) | Full detail including subagent calls/results, plans, and assistant responses |
 
 The history section is placed at the **top** of the system prompt, with workflow rules at the bottom (closer to the conversation for stronger influence on the model).
-
-Completed mini-goals show only the summary. Incomplete mini-goals (no result entry following) show summary + full detail marked as `[MINI_GOAL incomplete]`.
 
 ## HTTP Endpoints
 
@@ -92,37 +85,45 @@ Completed mini-goals show only the summary. Incomplete mini-goals (no result ent
 | `POST /hook/session-start` | hook.js | Stores main session ID, returns system prompt |
 | `POST /hook/user-prompt-submit` | hook.js | Runs topic detection, records prompt, triggers restart if new topic |
 | `POST /hook/exit-plan-mode` | hook.js | Records accepted plan to history |
-| `POST /hook/subagent-pretool` | hook.js | Records Task tool call to history |
+| `POST /hook/subagent-pretool` | hook.js | Records Task tool call to history, checks session size |
 | `POST /hook/subagent-stop` | hook.js | Records subagent stop + result to history |
 | `POST /hook/stop` | hook.js | Records assistant response |
-| `POST /tool/mini-goal-worker` | mcp-server.js | Checks sizes, executes worker, returns result |
 | `POST /tool/web-search` | mcp-server.js | Proxies web search via external API |
 | `POST /tool/web-fetch` | mcp-server.js | Fetches URL as markdown via Cloudflare Browser Rendering |
-| `POST /clear-history` | slash command | Resets history and worker session |
+| `POST /clear-history` | slash command | Resets history |
 
 ## MCP Tools
 
 | Tool | Description |
 |:---|:---|
-| `mini-goal-worker` | Delegates a mini goal to the persistent worker. Takes `summary` and `detail`. |
-| `web-search` | Web search via Grok model (whatai.cc). Requires `SEARCH_API_KEY` in `.env`. |
+| `web-search` | Web search via Grok model. Requires `SEARCH_API_KEY`, `SEARCH_API_URL`, `SEARCH_MODEL` in `.env`. |
 | `web-fetch` | Fetches URL as markdown via Cloudflare Browser Rendering. Requires `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` in `.env`. |
+
+## Custom Agents
+
+| Agent | Description |
+|:---|:---|
+| `mini-goal-worker` | Executes a mini goal — a small, focused unit of work with one logical objective. |
+
+Defined in `agents/mini-goal-worker.md`. Auto-discovered by Claude Code from the plugin directory.
 
 ## Slash Commands
 
-- `/clear-worker-history` — Clears the current worker's history and session
+- `/clear-worker-history` — Clears the current worker's history
 
 ## File Structure
 
 ```
 foreman/
 ├── claudex.js                      # Launcher + HTTP server + restart logic
+├── agents/
+│   └── mini-goal-worker.md         # Custom subagent definition
 ├── lib/
-│   ├── hooks.js                    # Hook handlers (session-start, user-prompt-submit, etc.)
-│   ├── tools.js                    # Mini-goal-worker handler + tool registry
+│   ├── hooks.js                    # Hook handlers (session-start, subagent-pretool, etc.)
+│   ├── tools.js                    # MCP tool handlers (web-search, web-fetch)
 │   ├── web-search.js               # Web search via external API
 │   ├── web-fetch.js                # URL fetch + LLM-based content extraction
-│   ├── prompt.js                   # System prompt builder (3-tier history, justRestarted flag)
+│   ├── prompt.js                   # System prompt builder (3-tier history compression)
 │   ├── topic-detector.js           # LLM-based new topic detection
 │   ├── recent-history.js           # Short-term history for topic detection
 │   ├── history.js                  # history.jsonl management
@@ -147,7 +148,6 @@ Per-worker data is stored at `~/.claude/mini-goal-workers/<WORKER_NAME>/` (defau
 
 | File | Purpose |
 |:---|:---|
-| `session-id` | Worker's Claude Code session ID for resuming |
 | `history.jsonl` | Full interaction log |
 | `recent-history.json` | Short-term history for topic detection |
 | `last-system-prompt.log` | Last generated system prompt (debug) |

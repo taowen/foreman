@@ -33,7 +33,7 @@ const workerName = process.env.WORKER_NAME || basename(process.cwd());
 
 const workerDir = join(homedir(), ".claude", "mini-goal-workers", workerName);
 const userArgs = process.argv.slice(2);
-const MAX_SESSION_SIZE = 600 * 1024; // 600KB
+const MAX_SESSION_SIZE = 650 * 1024; // 650KB
 
 // --- Initialize modules (phase 1: no dependency on loaded history) ---
 const log = createLogger(workerDir);
@@ -45,7 +45,7 @@ const onRestart = (prompt, reason) => {
   pendingRestart = { prompt, reason };
   setTimeout(() => { if (child) child.kill("SIGTERM"); }, 200);
 };
-const toolHandlers = createToolHandlers({ sessionManager, historyManager, workerDir, pluginDir, log, MAX_SESSION_SIZE, sharedState, onRestart });
+const toolHandlers = createToolHandlers({ historyManager, pluginDir, log });
 
 // Phase 2 modules (depend on loaded history) are initialized at startup below
 let recentHistory, topicDetector, hookHandlers;
@@ -107,7 +107,6 @@ const httpServer = createServer(async (req, res) => {
     // --- Clear history ---
     if (req.method === "POST" && req.url === "/clear-history") {
       historyManager.clearHistory();
-      sessionManager.deleteSessionId();
       recentHistory.clear();
       res.writeHead(200);
       res.end();
@@ -162,7 +161,7 @@ log("server", "starting...");
 historyManager.loadHistory();
 recentHistory = createRecentHistory(workerDir, historyManager, log);
 topicDetector = createTopicDetector(recentHistory, log);
-hookHandlers = createHookHandlers({ historyManager, recentHistory, promptBuilder, workerDir, log, topicDetector, sharedState, onRestart });
+hookHandlers = createHookHandlers({ historyManager, recentHistory, promptBuilder, workerDir, log, topicDetector, sharedState, onRestart, sessionManager, MAX_SESSION_SIZE });
 httpServer.listen(0, "127.0.0.1", () => {
   serverPort = httpServer.address().port;
   log("server", `listening on 127.0.0.1:${serverPort}`);
