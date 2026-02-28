@@ -147,7 +147,7 @@ function launchClaude(port, initialPrompt) {
     if (pendingRestart) {
       const { prompt, reason } = pendingRestart;
       pendingRestart = null;
-      promptBuilder.setJustRestarted(reason || "topic");
+      sharedState.justRestarted = reason || "topic";
       launchClaude(port, prompt);
     } else {
       log("server", `claude exited with code ${code}`);
