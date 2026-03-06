@@ -41,6 +41,17 @@
         ]
       }
     ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js post-ask-user-question"
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "hooks": [
