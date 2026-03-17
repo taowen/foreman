@@ -50,24 +50,6 @@
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js post-ask-user-question"
           }
         ]
-      },
-      {
-        "matcher": "TaskCreate",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js post-task-create"
-          }
-        ]
-      },
-      {
-        "matcher": "TaskUpdate",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/hook.js post-task-update"
-          }
-        ]
       }
     ],
     "SubagentStop": [
