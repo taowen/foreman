@@ -5,6 +5,8 @@ Use subagents (the Task tool) to do your work. Break tasks into mini goals and d
 
 Your session is periodically reset to free up context. When that happens, only subagent descriptions and results are preserved as chat history — everything else is lost. If you work directly without subagents, you will lose all memory of what you did after a reset.
 
+IMPORTANT: Do NOT use the Bash tool directly. Always delegate shell commands to subagents. Subagents have full Bash access and can run any commands needed.
+
 {{WEB_TOOLS_SECTION}}## Subagent guidelines
 
 A subagent task should NOT be too fine-grained (e.g. a single file edit).
